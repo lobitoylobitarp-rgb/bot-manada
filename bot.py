@@ -168,6 +168,81 @@ def rachas_text(data: dict) -> str:
     return "\n".join(lines)
 
 
+NOMBRES_CORTOS = {
+    "agua":      "💧 Agua (2L)",
+    "oracion":   "🙏 Oración",
+    "lectura":   "📖 Lectura",
+    "ejercicio": "💪 Ejercicio",
+}
+
+
+def resumen_periodo(data: dict, titulo: str, fecha_ini: str, fecha_fin: str,
+                    dias_periodo: int) -> str:
+    """Retroalimentación de un rango de fechas (inclusive), texto plano."""
+    regs = [h for h in data["habitos"] if fecha_ini <= h["fecha"] <= fecha_fin]
+    if not regs:
+        return f"{titulo}\n\nSin registros en este periodo. ¡La próxima vez sí! 💛"
+
+    total = len(regs)
+    texto = f"{titulo}\n({fecha_ini} → {fecha_fin})\n\n"
+    mejor, peor = None, None
+    for clave, _ in HABITOS:
+        cumplidos = sum(1 for h in regs if h["respuestas"].get(clave))
+        pct = round(cumplidos / total * 100)
+        icon = "🌟" if pct >= 80 else "👍" if pct >= 50 else "🔴"
+        texto += f"{NOMBRES_CORTOS[clave]}: {cumplidos}/{total} días ({pct}%) {icon}\n"
+        if mejor is None or pct > mejor[1]:
+            mejor = (clave, pct)
+        if peor is None or pct < peor[1]:
+            peor = (clave, pct)
+
+    texto += f"\n📅 Días contestados: {total} de {dias_periodo}\n"
+
+    rachas = rachas_text(data)
+    if rachas:
+        texto += f"\n🔥 Rachas activas:\n{rachas}\n"
+
+    # Retroalimentación tipo coach
+    promedio = sum(
+        sum(1 for h in regs if h["respuestas"].get(c)) for c, _ in HABITOS
+    ) / (total * len(HABITOS)) * 100
+    texto += "\n💬 Retroalimentación:\n"
+    if promedio >= 80:
+        texto += "¡Excelente, Priscila! Constancia de lobo alfa 🐺✨ Sigue así."
+    elif promedio >= 60:
+        texto += "Buen ritmo 💪 Ya casi. Un empujoncito más y llegas al 80%."
+    elif promedio >= 40:
+        texto += "Vamos a medias 😌 Elige UN hábito y hazlo sagrado esta semana."
+    else:
+        texto += "Semana difícil, y está bien 💛 Hoy es un buen día para reiniciar."
+    if mejor and peor and mejor[0] != peor[0] and mejor[1] != peor[1]:
+        texto += f"\nTu fuerte: {NOMBRES_CORTOS[mejor[0]]}. A trabajar: {NOMBRES_CORTOS[peor[0]]}."
+    return texto
+
+
+def resumen_semanal(data: dict) -> str:
+    hoy = datetime.now(TIMEZONE).date()
+    ini = (hoy - timedelta(days=6)).strftime("%Y-%m-%d")
+    return resumen_periodo(data, "📊 RETROALIMENTACIÓN SEMANAL", ini, hoy.strftime("%Y-%m-%d"), 7)
+
+
+def resumen_mensual(data: dict, año: int, mes: int) -> str:
+    import calendar as _cal
+    dias_mes = _cal.monthrange(año, mes)[1]
+    ini = f"{año:04d}-{mes:02d}-01"
+    fin = f"{año:04d}-{mes:02d}-{dias_mes:02d}"
+    nombre = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+              "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][mes]
+    return resumen_periodo(data, f"📆 RETROALIMENTACIÓN DE {nombre.upper()} {año}", ini, fin, dias_mes)
+
+
+def resumen_anual(data: dict, año: int) -> str:
+    ini = f"{año:04d}-01-01"
+    fin = f"{año:04d}-12-31"
+    dias = 366 if (año % 4 == 0 and (año % 100 != 0 or año % 400 == 0)) else 365
+    return resumen_periodo(data, f"🎉 TU AÑO {año} EN HÁBITOS", ini, fin, dias)
+
+
 # ---------------------------------------------------------------- teclado
 def si_no_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
@@ -278,6 +353,20 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(query.message.chat_id, txt)
 
 
+async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(resumen_semanal(load_data()))
+
+
+async def cmd_mes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(TIMEZONE)
+    await update.message.reply_text(resumen_mensual(load_data(), now.year, now.month))
+
+
+async def cmd_anual(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(TIMEZONE)
+    await update.message.reply_text(resumen_anual(load_data(), now.year))
+
+
 async def job_checkin(context: ContextTypes.DEFAULT_TYPE):
     data = load_data()
     chat_id = data.get("chat_id")
@@ -285,6 +374,40 @@ async def job_checkin(context: ContextTypes.DEFAULT_TYPE):
         logger.info("Sin chat_id todavía (nadie ha hecho /start)")
         return
     await iniciar_checkin(context.bot, chat_id)
+
+
+async def job_resumen_semanal(context: ContextTypes.DEFAULT_TYPE):
+    """Domingos 10:30pm — retroalimentación de la semana."""
+    data = load_data()
+    chat_id = data.get("chat_id")
+    if not chat_id:
+        return
+    await context.bot.send_message(chat_id, resumen_semanal(data))
+
+
+async def job_resumen_mensual(context: ContextTypes.DEFAULT_TYPE):
+    """Día 1 de cada mes 9am — retroalimentación del mes anterior."""
+    now = datetime.now(TIMEZONE)
+    if now.day != 1:
+        return
+    data = load_data()
+    chat_id = data.get("chat_id")
+    if not chat_id:
+        return
+    año, mes = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
+    await context.bot.send_message(chat_id, resumen_mensual(data, año, mes))
+
+
+async def job_resumen_anual(context: ContextTypes.DEFAULT_TYPE):
+    """1 de enero 10am — retroalimentación del año anterior."""
+    now = datetime.now(TIMEZONE)
+    if now.month != 1 or now.day != 1:
+        return
+    data = load_data()
+    chat_id = data.get("chat_id")
+    if not chat_id:
+        return
+    await context.bot.send_message(chat_id, resumen_anual(data, now.year - 1))
 
 
 async def error_handler(update, context):
@@ -303,9 +426,16 @@ def main():
     app.add_handler(CommandHandler("start",   cmd_start))
     app.add_handler(CommandHandler("hoy",     cmd_hoy))
     app.add_handler(CommandHandler("resumen", cmd_resumen))
+    app.add_handler(CommandHandler("semana",  cmd_semana))
+    app.add_handler(CommandHandler("mes",     cmd_mes))
+    app.add_handler(CommandHandler("anual",   cmd_anual))
     app.add_handler(CallbackQueryHandler(button_callback))
 
-    app.job_queue.run_daily(job_checkin, time=dt_time(22, 0, tzinfo=TIMEZONE), name="checkin")
+    jq = app.job_queue
+    jq.run_daily(job_checkin,         time=dt_time(22, 0,  tzinfo=TIMEZONE), name="checkin")
+    jq.run_daily(job_resumen_semanal, time=dt_time(22, 30, tzinfo=TIMEZONE), days=(6,), name="resumen_semanal")
+    jq.run_daily(job_resumen_mensual, time=dt_time(9,  0,  tzinfo=TIMEZONE), name="resumen_mensual")
+    jq.run_daily(job_resumen_anual,   time=dt_time(10, 0,  tzinfo=TIMEZONE), name="resumen_anual")
 
     logger.info("Bot Manada iniciado. Esperando mensajes...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
