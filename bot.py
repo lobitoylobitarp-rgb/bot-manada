@@ -17,8 +17,10 @@ import copy
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, time as dt_time, timedelta
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import pytz
 import requests
@@ -414,6 +416,29 @@ async def error_handler(update, context):
     logger.error(f"Error no manejado: {context.error}")
 
 
+# ------------------------------------------------------------- keep-alive
+# Render Web Service (plan gratis) exige escuchar en $PORT y se duerme sin
+# tráfico; un ping externo (p.ej. UptimeRobot cada 5 min) lo mantiene vivo.
+class _PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass  # no llenar los logs con cada ping
+
+
+def _keep_alive_server():
+    port = int(os.environ.get("PORT", "10000"))
+    HTTPServer(("0.0.0.0", port), _PingHandler).serve_forever()
+
+
 # ---------------------------------------------------------------- main
 def main():
     # Python 3.12+ ya no crea event loop automático en el hilo principal
@@ -421,6 +446,7 @@ def main():
         asyncio.get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
+    threading.Thread(target=_keep_alive_server, daemon=True).start()
     app = Application.builder().token(TOKEN).build()
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("start",   cmd_start))
