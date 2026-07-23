@@ -8,7 +8,9 @@ Bot de Telegram que cada noche a las **10:00pm (hora Ciudad de México)** te hac
 - 📖 ¿Leí al menos 10 minutos?
 - 💪 ¿Hice al menos 30 minutos de ejercicio?
 
-Comandos: `/start` (registrarte), `/hoy` (contestar ahora), `/resumen` (últimos 7 días + rachas).
+Comandos: `/start` (registrarte), `/hoy` (contestar ahora), `/resumen` (cuadrícula 7 días), `/semana`, `/mes`, `/anual` (retroalimentación).
+
+Resúmenes automáticos: semanal (domingo 10:30pm), mensual (día 1, 9am), anual (1 enero, 10am).
 
 ---
 
